@@ -23,20 +23,30 @@ function calculateSignature(path: string, apiKey: string, timestamp: number): st
 }
 
 // Função para fazer requisições à API FoxESS
-async function makeFoxESSRequest(path: string, body: any = {}) {
+async function makeFoxESSRequest(path: string, body: any = {}, method: 'get' | 'post' = 'post') {
     const timestamp = Date.now();
     if (!FOXESS_API_KEY) throw new Error("FOXESS_API_KEY não configurado");
 
     const signature = calculateSignature(path, FOXESS_API_KEY, timestamp);
-    const response = await axios.post(`${BASE_URL}${path}`, body, {
-        headers: {
-            'Content-Type': 'application/json',
-            'token': FOXESS_API_KEY,
-            'signature': signature,
-            'lang': 'en',
-            'timestamp': timestamp.toString(),
-        }
-    });
+    const headers = {
+        'Content-Type': 'application/json',
+        'token': FOXESS_API_KEY,
+        'signature': signature,
+        'lang': 'en',
+        'timestamp': timestamp.toString(),
+    };
+
+    let response;
+    if (method === 'get') {
+        response = await axios.get(`${BASE_URL}${path}`, {
+            headers,
+            params: body // body deve conter o parâmetro 'sn' (número de série do inversor)
+        });
+    } else {
+        response = await axios.post(`${BASE_URL}${path}`, body, {
+            headers
+        });
+    }
     return response.data;
 }
 
@@ -75,11 +85,11 @@ bot.on("callback_query", async (callbackQuery: TelegramBot.CallbackQuery) => {
 async function getRealTimeData(chatId: number): Promise<void> {
     try {
         const path = '/op/v0/device/real/query';
-        const data = await makeFoxESSRequest(path, { sn: DEVICE_SN});
+        const data = await makeFoxESSRequest(path, { sn: DEVICE_SN}, 'post');
         if (data.errno !== 0) throw new Error(`Invalid response code: ${data.errno.toString()}`);
         
         const realTimeData = data.result[0];
-        console.log(realTimeData);
+        //console.log(realTimeData);
         const message = `
 📡 **Dados em Tempo Real**
 🔋 Tensão da Rede: ${realTimeData?.datas?.find((d: { variable: string; value: number }) => d.variable === 'RVolt')?.value || 'N/A'}V
@@ -99,17 +109,34 @@ async function getRealTimeData(chatId: number): Promise<void> {
 // Função para buscar produção de energia
 async function getEnergyData(chatId: number): Promise<void> {
     try {
-        const path = '/op/v0/device/energy/query';
-        const data = await makeFoxESSRequest(path, { sn: DEVICE_SN });
-        
+        const path = '/op/v0/device/report/query';
+        const dataReport = {
+            sn: DEVICE_SN,
+            year: new Date().getFullYear(),
+            month : new Date().getMonth() + 1,
+            day : new Date().getDate(),
+            "dimension": "day",
+            "variables" : ["generation","feedin","gridConsumption","chargeEnergyToTal","dischargeEnergyToTal"]
+        };
+        const data = await makeFoxESSRequest(path, dataReport, 'post');
+
+        console.log( dataReport, JSON.stringify( data, null, 2));
         if (data.errno !== 0) throw new Error(`Invalid response code: ${data.errno.toString()}`);
         
-        const energyData = data.result[0];
+        const energyData = data.result;
+        const generation = energyData.find((item: any) => item.variable === 'generation');
+        const feedin = energyData.find((item: any) => item.variable === 'feedin');
+        const gridConsumption = energyData.find((item: any) => item.variable === 'gridConsumption');
+        const chargeEnergy = energyData.find((item: any) => item.variable === 'chargeEnergyToTal');
+        const dischargeEnergy = energyData.find((item: any) => item.variable === 'dischargeEnergyToTal');
+        
         const message = `
 ⚡ **Produção de Energia**
-🔆 Hoje: ${energyData?.datas?.find((d: { variable: string; value: number }) => d.variable === 'daily')?.value || 'N/A'} kWh
-📅 Mensal: ${energyData?.datas?.find((d: { variable: string; value: number }) => d.variable === 'monthly')?.value || 'N/A'} kWh
-📈 Total: ${energyData?.datas?.find((d: { variable: string; value: number }) => d.variable === 'total')?.value || 'N/A'} kWh
+🔆 Geração: ${generation?.values?.[0] || 'N/A'} ${generation?.unit || 'kWh'}
+🔌 Injeção na Rede: ${feedin?.values?.[0] || 'N/A'} ${feedin?.unit || 'kWh'}
+🏭 Consumo da Rede: ${gridConsumption?.values?.[0] || 'N/A'} ${gridConsumption?.unit || 'kWh'}
+🔋 Energia Carregada: ${chargeEnergy?.values?.[0] || 'N/A'} ${chargeEnergy?.unit || 'kWh'}
+🔋 Energia Descarregada: ${dischargeEnergy?.values?.[0] || 'N/A'} ${dischargeEnergy?.unit || 'kWh'}
         `;
         bot.sendMessage(chatId, message);
     } catch (error) {
