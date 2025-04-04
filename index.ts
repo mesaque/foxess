@@ -120,7 +120,6 @@ async function getEnergyData(chatId: number): Promise<void> {
         };
         const data = await makeFoxESSRequest(path, dataReport, 'post');
 
-        console.log( dataReport, JSON.stringify( data, null, 2));
         if (data.errno !== 0) throw new Error(`Invalid response code: ${data.errno.toString()}`);
         
         const energyData = data.result;
@@ -147,16 +146,23 @@ async function getEnergyData(chatId: number): Promise<void> {
 // Função para buscar status do sistema
 async function getStatusData(chatId: number): Promise<void> {
     try {
-        const path = '/op/v0/device/status/query';
-        const data = await makeFoxESSRequest(path, { sn: DEVICE_SN });
-        
+        const path = '/op/v0/device/detail';
+        const data = await makeFoxESSRequest(path, { sn: DEVICE_SN }, 'get');
+        ;
         if (data.errno !== 0) throw new Error(`Invalid response code: ${data.errno.toString()}`);
         
-        const statusData = data.result[0];
+        const statusData = data.result;
+
         const message = `
 ✅ **Status do Sistema**
-⚙ Estado: ${statusData?.datas?.find((d: { variable: string; value: string }) => d.variable === 'status')?.value || 'N/A'}
+⚙ Estado: ${statusData?.status === 1 ? 'Online' : 'Offline'}
 🕒 Última Atualização: ${statusData?.time || 'N/A'}
+🔌 Tipo de Dispositivo: ${statusData?.deviceType || 'N/A'}
+📱 Versão Master: ${statusData?.masterVersion || 'N/A'}
+📱 Versão Slave: ${statusData?.slaveVersion || 'N/A'}
+📱 Versão Manager: ${statusData?.managerVersion || 'N/A'}
+🔋 Possui Bateria: ${statusData?.hasBattery ? 'Sim' : 'Não'}
+☀️ Possui Painéis Solares: ${statusData?.hasPV ? 'Sim' : 'Não'}
         `;
         bot.sendMessage(chatId, message);
     } catch (error) {
