@@ -58,7 +58,8 @@ bot.onText(/\/start/, async (msg: TelegramBot.Message) => {
             inline_keyboard: [
                 [{ text: "📊 Dados em tempo real", callback_data: "real_time" }],
                 [{ text: "⚡ Produção de energia", callback_data: "energy" }],
-                [{ text: "🔄 Atualizar Status", callback_data: "status" }]
+                [{ text: "🔄 Atualizar Status", callback_data: "status" }],
+                [{ text: "📊 Histórico", callback_data: "history" }]
             ]
         }
     });
@@ -78,6 +79,8 @@ bot.on("callback_query", async (callbackQuery: TelegramBot.CallbackQuery) => {
         await getEnergyData(chatId);
     } else if (action === "status") {
         await getStatusData(chatId);
+    } else if (action === "history") {
+        await getHistoryData(chatId);
     }
 });
 
@@ -163,6 +166,98 @@ async function getStatusData(chatId: number): Promise<void> {
 📱 Versão Manager: ${statusData?.managerVersion || 'N/A'}
 🔋 Possui Bateria: ${statusData?.hasBattery ? 'Sim' : 'Não'}
 ☀️ Possui Painéis Solares: ${statusData?.hasPV ? 'Sim' : 'Não'}
+        `;
+        bot.sendMessage(chatId, message);
+    } catch (error) {
+        bot.sendMessage(chatId, "Erro ao buscar status do sistema.");
+    }
+} 
+
+// Função para buscar status do sistema
+async function getHistoryData(chatId: number): Promise<void> {
+    try {
+        const path = '/op/v0/device/history/query';
+        // Obtém a data atual
+        const now = new Date();
+        // Define para a primeira hora da madrugada (00:00:00)
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+        // Converte para timestamp em milissegundos
+        const beginTimestamp = startOfDay.getTime();
+        // Usa o mesmo valor para end por enquanto
+        // Define para a última hora do dia (23:59:59)
+        const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+        // Converte para timestamp em milissegundos
+        const endTimestamp = endOfDay.getTime();
+        const data = await makeFoxESSRequest(path, { sn: DEVICE_SN, begin: beginTimestamp, end: endTimestamp }, 'post');    
+        if (data.errno !== 0) throw new Error(`Invalid response code: ${data.errno.toString()}`);
+        
+        const historyData = data.result[0].datas;
+        
+        // Definindo interface para os itens de dados históricos
+        interface HistoryDataItem {
+            variable: string;
+            data: Array<{
+                time: string;
+                value: number;
+            }>;
+        }
+        
+        // Somar todos os dados de potência solar
+        const pvPowerData = historyData.find((item: HistoryDataItem) => item.variable === "pvPower");
+        const totalPvPower = pvPowerData?.data.reduce((sum: number, item: {time: string; value: number}) => sum + (item.value || 0), 0) || 0;
+        
+        // Obter o último valor de potência solar
+        const lastPvPower = pvPowerData?.data[pvPowerData.data.length - 1]?.value || 0;
+        
+        // Somar todos os dados de carga
+        const loadPowerData = historyData.find((item: HistoryDataItem) => item.variable === "loadsPower");
+        const totalLoadPower = loadPowerData?.data.reduce((sum: number, item: {time: string; value: number}) => sum + (item.value || 0), 0) || 0;
+        
+        // Obter o último valor de carga
+        const lastLoadPower = loadPowerData?.data[loadPowerData.data.length - 1]?.value || 0;
+        
+        // Somar todos os dados de injeção na rede
+        const feedinPowerData = historyData.find((item: HistoryDataItem) => item.variable === "feedinPower");
+        const totalFeedinPower = feedinPowerData?.data.reduce((sum: number, item: {time: string; value: number}) => sum + (item.value || 0), 0) || 0;
+        
+        // Obter o último valor de injeção na rede
+        const lastFeedinPower = feedinPowerData?.data[feedinPowerData.data.length - 1]?.value || 0;
+        
+        // Somar todos os dados de temperatura ambiente
+        const tempData = historyData.find((item: HistoryDataItem) => item.variable === "ambientTemperation");
+        const totalTemp = tempData?.data.reduce((sum: number, item: {time: string; value: number}) => sum + (item.value || 0), 0) || 0;
+        
+        // Obter o último valor de temperatura
+        const lastTemp = tempData?.data[tempData.data.length - 1]?.value || 0;
+        
+        // Somar todos os dados de tensão PV1
+        const pv1VoltData = historyData.find((item: HistoryDataItem) => item.variable === "pv1Volt");
+        const totalPv1Volt = pv1VoltData?.data.reduce((sum: number, item: {time: string; value: number}) => sum + (item.value || 0), 0) || 0;
+        
+        // Obter o último valor de tensão PV1
+        const lastPv1Volt = pv1VoltData?.data[pv1VoltData.data.length - 1]?.value || 0;
+        
+        // Somar todos os dados de corrente PV1
+        const pv1CurrentData = historyData.find((item: HistoryDataItem) => item.variable === "pv1Current");
+        const totalPv1Current = pv1CurrentData?.data.reduce((sum: number, item: {time: string; value: number}) => sum + (item.value || 0), 0) || 0;
+        
+        // Obter o último valor de corrente PV1
+        const lastPv1Current = pv1CurrentData?.data[pv1CurrentData.data.length - 1]?.value || 0;
+        
+        // Obter o horário da última atualização
+        const lastUpdateTime = pvPowerData?.data[pvPowerData.data.length - 1]?.time || 'N/A';
+
+        const message = `
+✅ **Histórico Diário do Sistema Solar**
+🕒 Última Atualização: ${lastUpdateTime}
+🕒 Data de início : ${startOfDay}
+🕒 Data de fim : ${endOfDay}
+☀️ Potência Solar: ${totalPvPower} V
+🔌 Consumo: ${totalLoadPower} V
+🔋 Injeção na Rede: ${totalFeedinPower} V
+🌡️ Temperatura: ${lastTemp} °C
+⚡ Tensão PV1: ${lastPv1Current} V
+⚡ Corrente PV1: ${lastPv1Current} A
         `;
         bot.sendMessage(chatId, message);
     } catch (error) {
