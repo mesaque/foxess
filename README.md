@@ -58,7 +58,7 @@ The bot offers the following features through an interactive menu:
 1. Clone the repository:
    ```bash
    git clone https://github.com/mesaque/foxess.git
-   cd foxess-telegram-bot
+   cd foxess
    ```
 
 2. Install dependencies:
